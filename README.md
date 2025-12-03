@@ -51,27 +51,11 @@ A web-based application for annotating medical images with vertical line markers
 
 #### Alternative Docker Commands
 
-**Build the image:**
+**Build and run the image:**
 ```bash
 docker build -t qtim/ga-segmentation-app .
 cp .env_sample .env
 docker compose up -d
-```
-
-**Run the container:**
-```bash
-docker run -p 5005:5005 \
-  -v /path/to/your/images:/app/images:ro \
-  -v $(pwd)/output:/app/output \
-  qtim/ga-segmentation-app
-
-PORT=8082
-CMD="python app.py --host 0.0.0.0 --port $PORT --image-paths ga_volumes_w_res.csv"
-# CMD="bash"
-docker run -p 5005:5005 \
-  -v /path/to/your/images:/app/images:ro \
-  -v $(pwd)/output:/app/output \
-  qtim/ga-segmentation-app $CMD
 ```
 
 ### Option 2: Local Python Installation
