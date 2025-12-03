@@ -4,15 +4,18 @@ services:
   ga-segmentation-app:
     build: .
     ports:
-      - "8082:8082"
+      - "${PORT}:${PORT}"
     volumes:
       # Mount PACS images directory - ensure the path exists and is accessible
-      - /persist/PACS/VisupacImages:/persist/PACS/VisupacImages:ro
+      - ${PACS_DIR}:${PACS_DIR}:ro
       # Mount output directory for persistent annotations
       - ./output:/app/output
       - .:/app
     environment:
-      - FLASK_ENV=development # development or production
-      - BASE_PATH=/ga_segmentation_app # for dev or port forwarding, comment out
-    command: ["python", "app.py", "--host", "0.0.0.0", "--port", "8082", "--image-paths", "ga_volumes_w_res.csv"]
+      FLASK_ENV: ${FLASK_ENV} # development or production
+      BASE_PATH: ${BASE_PATH} # for dev or port forwarding, comment out
+      IMAGE_PATHS: ${IMAGE_PATHS}
+      PORT: ${PORT}
+    command: >
+      python app.py --host 0.0.0.0 --port ${PORT} --image-paths ${IMAGE_PATHS}
     restart: unless-stopped
