@@ -1,0 +1,24 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <title>GA segmentation</title>
+</head>
+<body>
+    <h2>GA segmentation</h2>
+    <table border="1" cellpadding="5" cellspacing="0">
+        <tr>
+            <th>Volume</th>
+            <th>Files</th>
+            <th>Annotated</th>
+        </tr>
+        {% for volume in volumes %}
+        <tr>
+            <td><a href="{{ BASE_PATH }}/index?volume={{ volume.name }}">{{ volume.name }}</a></td>
+            <td style="text-align: center;">{{ volume.file_count }}</td>
+            <td style="text-align: center;">{% if volume.has_annotation %}✓{% endif %}</td>
+        </tr>
+        {% endfor %}
+    </table>
+</body>
+</html> 

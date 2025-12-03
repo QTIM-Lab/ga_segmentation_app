@@ -1,0 +1,1040 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <title>Draw Lines for Vertical Markers</title>
+    <style>
+        #container {
+            position: relative;
+            display: inline-block;
+        }
+        #main-image {
+            display: block;
+            /* max-width: 150vw;
+            max-height: 140vh;
+            width: 60vw; */
+            /* height: auto; */
+        }
+        #line-canvas {
+            position: absolute;
+            left: 0;
+            top: 0;
+            pointer-events: auto;
+            z-index: 10;
+            cursor: crosshair;
+        }
+        #scrollbar-container {
+            display: flex;
+            flex-direction: row;
+            align-items: center;
+        }
+        #vertical-scrollbar {
+            writing-mode: bt-lr; /* vertical orientation */
+            -webkit-appearance: slider-vertical;
+            appearance: slider-vertical;
+            width: 20px;
+            height: 300px;
+            margin-left: 10px;
+        }
+        #controls {
+            margin: 10px 0;
+            padding: 10px;
+            border: 1px solid #ccc;
+            background-color: #f9f9f9;
+        }
+        .line-controls {
+            display: flex;
+            align-items: center;
+            margin: 5px 0;
+        }
+        .line-controls button {
+            margin: 0 5px;
+            padding: 2px 8px;
+        }
+        .line-controls input[type="color"] {
+            margin: 0 5px;
+        }
+        .line-controls input[type="range"] {
+            width: 100px;
+            margin: 0 5px;
+        }
+        .line-pair {
+            border: 1px solid #ddd;
+            margin: 5px 0;
+            padding: 10px;
+            border-radius: 5px;
+            background-color: #f9f9f9;
+        }
+        .line-pair:hover {
+            background-color: #f0f0f0;
+        }
+        #save-btn, #previous-volume-btn, #next-volume-btn, #back-btn {
+            margin: 5px;
+            padding: 10px 20px;
+            font-size: 14px;
+            border: none;
+            border-radius: 5px;
+            cursor: pointer;
+        }
+        #save-btn {
+            background-color: #28a745;
+            color: white;
+        }
+        #save-btn:hover:not(:disabled) {
+            background-color: #218838;
+        }
+        #previous-volume-btn {
+            background-color: #17a2b8;
+            color: white;
+        }
+        #previous-volume-btn:hover:not(:disabled) {
+            background-color: #138496;
+        }
+        #next-volume-btn {
+            background-color: #007bff;
+            color: white;
+        }
+        #next-volume-btn:hover:not(:disabled) {
+            background-color: #0056b3;
+        }
+        #back-btn {
+            background-color: #6c757d;
+            color: white;
+        }
+        #back-btn:hover {
+            background-color: #545b62;
+        }
+        button:disabled {
+            opacity: 0.6;
+            cursor: not-allowed;
+        }
+    </style>
+</head>
+<body>
+    <h2>Draw Lines to Mark Vertical Positions</h2>
+    <div id="volume-info" style="margin: 10px 0; padding: 10px; background-color: #f8f9fa; border: 1px solid #dee2e6; border-radius: 5px;">
+        <strong>Current Volume:</strong> <span id="current-volume-name">Loading...</span>
+    </div>
+    <p><strong>Instructions:</strong> Click and drag on the image to draw a line. When you release the mouse, two vertical lines will be automatically placed at the start and end points of your drawn line.</p>
+    <div id="scrollbar-container">
+        <div id="container">
+            <img id="main-image" src="{{ BASE_PATH }}/image" alt="Image" />
+            <canvas id="line-canvas"></canvas>
+        </div>
+        <input type="range" id="vertical-scrollbar" min="0" value="0" step="1" orient="vertical">
+        <div id="nav-buttons" style="display: flex; flex-direction: column; margin-left: 10px;">
+            <button id="btn-up" style="font-size: 20px;">&#9650;</button>
+            <div id="current-image-info" style="text-align: center; font-size: 12px; margin: 5px 0; padding: 5px; background-color: #f0f0f0; border-radius: 3px;">
+                <div id="current-image-name" style="font-weight: bold;"></div>
+                <div id="current-image-status" style="color: #666;"></div>
+            </div>
+            <button id="btn-down" style="font-size: 20px;">&#9660;</button>
+        </div>
+    </div>
+    <div id="controls">
+        <button id="clear-lines-btn">Clear All Lines</button>
+        <div id="annotation-status" style="margin: 10px 0; padding: 10px; background-color: #e8f4fd; border: 1px solid #bee5eb; border-radius: 5px;">
+            <strong>Annotation Status:</strong> <span id="annotation-count">0</span> images have annotations out of <span id="total-images">0</span> total images
+        </div>
+        <div id="line-list"></div>
+    </div>
+    <button id="save-btn">Save All Annotations</button>
+    <button id="previous-volume-btn">Previous Volume</button>
+    <button id="next-volume-btn">Next Volume</button>
+    <button id="back-btn">Back to Volumes</button>
+    <script>
+        const BASE_PATH = "{{ BASE_PATH }}"; // Adjust if app is served under a subpath (NGINX reverse proxy maybe))
+        const img = document.getElementById('main-image');
+        const canvas = document.getElementById('line-canvas');
+        const container = document.getElementById('container');
+        const MOVE_STEP = 1;
+        let imageList = [];
+        let currentIndex = 0;
+        let linePositions = {}; // filename -> array of line objects
+        let selectedLineIndex = -1; // Currently selected line index
+        let currentResolution = 1.0; // Current image resolution
+        const scrollbar = document.getElementById('vertical-scrollbar');
+        const saveBtn = document.getElementById('save-btn');
+        const previousVolumeBtn = document.getElementById('previous-volume-btn');
+        const nextVolumeBtn = document.getElementById('next-volume-btn');
+        const btnUp = document.getElementById('btn-up');
+        const btnDown = document.getElementById('btn-down');
+        const clearLinesBtn = document.getElementById('clear-lines-btn');
+        const lineList = document.getElementById('line-list');
+        const annotationCount = document.getElementById('annotation-count');
+        const totalImages = document.getElementById('total-images');
+        const currentImageName = document.getElementById('current-image-name');
+        const currentImageStatus = document.getElementById('current-image-status');
+        const currentVolumeName = document.getElementById('current-volume-name');
+        
+        // Line drawing variables
+        let isDrawing = false;
+        let startX = 0;
+        let endX = 0;
+        let currentLine = null;
+
+        // Line colors for different lines
+        const lineColors = ['red', 'blue', 'green', 'orange', 'purple', 'cyan', 'magenta', 'yellow'];
+        let nextColorIndex = 0; // Track the next color to use
+
+        // Helper to get query parameter
+        function getQueryParam(name) {
+            const urlParams = new URLSearchParams(window.location.search);
+            return urlParams.get(name);
+        }
+        const volume = getQueryParam('volume');
+        debugger
+        if (!volume) {
+            alert('No volume selected!');
+        } else {
+            currentVolumeName.textContent = volume;
+        }
+
+        // Initialize line positions for current image
+        function initializeLinePositions(filename) {
+            if (!(filename in linePositions)) {
+                linePositions[filename] = [];
+            }
+        }
+
+        // Update annotation status display
+        function updateAnnotationStatus() {
+            if (imageList.length === 0) {
+                annotationCount.textContent = '0';
+                totalImages.textContent = '0';
+                return;
+            }
+            
+            totalImages.textContent = imageList.length;
+            let annotatedCount = 0;
+            imageList.forEach(filename => {
+                if (linePositions[filename] && linePositions[filename].length > 0) {
+                    annotatedCount++;
+                }
+            });
+            annotationCount.textContent = annotatedCount;
+        }
+
+        // Update current image information display
+        function updateCurrentImageInfo() {
+            if (imageList.length === 0) {
+                currentImageName.textContent = '';
+                currentImageStatus.textContent = '';
+                return;
+            }
+            
+            const filename = imageList[currentIndex];
+            const lines = linePositions[filename] || [];
+            const hasAnnotations = lines.length > 0;
+            
+            // Show shortened filename (last 30 characters)
+            const shortName = filename.length > 30 ? '...' + filename.slice(-30) : filename;
+            currentImageName.textContent = `Image ${currentIndex + 1}/${imageList.length}`;
+            
+            if (hasAnnotations) {
+                currentImageStatus.textContent = `✓ ${lines.length} annotations`;
+                currentImageStatus.style.color = '#28a745';
+            } else {
+                currentImageStatus.textContent = 'No annotations';
+                currentImageStatus.style.color = '#6c757d';
+            }
+        }
+
+        // Fetch image list and annotation data in parallel, then set the image
+        Promise.all([
+            fetch(BASE_PATH + '/images_in_volume?volume=' + encodeURIComponent(volume)).then(r => r.json()),
+            fetch(BASE_PATH + '/annotations?volume=' + encodeURIComponent(volume)).then(r => r.json())
+        ]).then(([images, annotations]) => {
+            imageList = images;
+            if (annotations && Array.isArray(annotations)) {
+                annotations.forEach(a => {
+                    if (!(a.filepath in linePositions)) {
+                        linePositions[a.filepath] = [];
+                    }
+                    // Convert old format (single x) to new format (array of lines)
+                    if (a.x !== undefined) {
+                        linePositions[a.filepath].push({
+                            x: a.x, // Keep x for vertical lines
+                            color: 'red',
+                            id: Date.now() + Math.random()
+                        });
+                    }
+                    // Handle new format (array of lines)
+                    if (a.lines && Array.isArray(a.lines)) {
+                        linePositions[a.filepath] = a.lines;
+                    }
+                });
+                
+                // Calculate the next color index based on existing lines
+                let maxColorIndex = -1;
+                Object.values(linePositions).forEach(lines => {
+                    lines.forEach(line => {
+                        const colorIndex = lineColors.indexOf(line.color);
+                        if (colorIndex > maxColorIndex) {
+                            maxColorIndex = colorIndex;
+                        }
+                    });
+                });
+                nextColorIndex = maxColorIndex + 1;
+            }
+            if (imageList.length > 0) {
+                currentIndex = 0;
+                setImage(imageList[currentIndex]);
+                scrollbar.max = imageList.length - 1;
+                scrollbar.value = 0;
+                updateAnnotationStatus();
+            }
+        });
+
+        function setImage(filename) {
+            img.src = BASE_PATH + '/image?volume=' + encodeURIComponent(volume) + '&filename=' + encodeURIComponent(filename);
+            
+            // Fetch resolution for this image
+            fetch(BASE_PATH + '/image_resolution?volume=' + encodeURIComponent(volume) + '&filename=' + encodeURIComponent(filename))
+                .then(response => response.json())
+                .then(data => {
+                    console.log('Received resolution data:', data);
+                    currentResolution = data.resolution || 1.0;
+                    console.log('Set currentResolution to:', currentResolution);
+                })
+                .catch(error => {
+                    console.log('Error fetching resolution:', error);
+                    currentResolution = 1.0;
+                });
+            
+            img.onload = function() {
+                resizeCanvas();
+                initializeLinePositions(filename);
+                updateLineControls();
+                drawLines();
+                updateCurrentImageInfo();
+            };
+            // Sync scrollbar
+            if (imageList.length > 0) {
+                scrollbar.value = currentIndex;
+            }
+        }
+
+        function resizeCanvas() {
+            canvas.width = img.width;
+            canvas.height = img.height;
+            canvas.style.width = img.width + 'px';
+            canvas.style.height = img.height + 'px';
+        }
+
+        window.onresize = resizeCanvas;
+
+        // Mouse events for line drawing
+        canvas.addEventListener('mousedown', function(e) {
+            if (imageList.length === 0) return;
+            
+            const rect = canvas.getBoundingClientRect();
+            const x = e.clientX - rect.left;
+            const y = e.clientY - rect.top;
+            
+            // Constrain start position to canvas bounds
+            const constrainedX = Math.max(0, Math.min(canvas.width - 1, x));
+            
+            // Start drawing
+            isDrawing = true;
+            startX = constrainedX;
+            endX = constrainedX;
+            
+            // Start drawing the temporary line
+            const filename = imageList[currentIndex];
+            initializeLinePositions(filename);
+            
+            // Create temporary line for preview
+            currentLine = {
+                startX: startX,
+                endX: endX,
+                color: lineColors[nextColorIndex % lineColors.length]
+            };
+            
+            drawLines();
+        });
+
+        canvas.addEventListener('mousemove', function(e) {
+            if (!isDrawing || imageList.length === 0) return;
+            
+            const rect = canvas.getBoundingClientRect();
+            const x = e.clientX - rect.left;
+            const y = e.clientY - rect.top;
+            
+            // Only update endX if mouse is within canvas bounds
+            if (x >= 0 && x < canvas.width) {
+                endX = x;
+                currentLine.endX = endX;
+                drawLines();
+            }
+        });
+
+        canvas.addEventListener('mouseup', function(e) {
+            if (!isDrawing || imageList.length === 0) return;
+            
+            isDrawing = false;
+            
+            // Check if it's a right-click - if so, cancel the line creation
+            if (e.button === 2) { // Right mouse button
+                currentLine = null;
+                drawLines();
+                return;
+            }
+            
+            // Only add lines if there was actual movement and it's a left-click
+            if (Math.abs(endX - startX) > 5) { // Minimum 5 pixel movement
+                const filename = imageList[currentIndex];
+                const color = currentLine.color;
+                
+                // Use the actual start and end positions (endX is the last valid position)
+                let leftLineX, rightLineX;
+                if (startX < endX) {
+                    // Dragging right: start is left, end is right
+                    leftLineX = startX;
+                    rightLineX = endX;
+                } else {
+                    // Dragging left: end is left, start is right
+                    leftLineX = endX;
+                    rightLineX = startX;
+                }
+                
+                // Add two vertical lines at left and right positions
+                const leftLine = {
+                    x: leftLineX,
+                    color: color,
+                    id: Date.now() + Math.random()
+                };
+                const rightLine = {
+                    x: rightLineX,
+                    color: color,
+                    id: Date.now() + Math.random() + 1
+                };
+                
+                // Add new pair at the beginning of the array (top of list)
+                linePositions[filename].unshift(leftLine, rightLine);
+                
+                // Increment color index for next pair
+                nextColorIndex++;
+                updateLineControls();
+                updateAnnotationStatus();
+                updateCurrentImageInfo();
+            }
+            
+            currentLine = null;
+            drawLines();
+        });
+
+        // Handle mouse leave to cancel drawing
+        canvas.addEventListener('mouseleave', function(e) {
+            if (isDrawing) {
+                // Don't cancel drawing, just stop updating
+            }
+        });
+
+        // Prevent context menu on right-click
+        canvas.addEventListener('contextmenu', function(e) {
+            e.preventDefault();
+        });
+
+        // Handle mouse up anywhere on the document
+        document.addEventListener('mouseup', function(e) {
+            if (isDrawing) {
+                canvas.dispatchEvent(new MouseEvent('mouseup', e));
+            }
+        });
+
+        window.addEventListener('keydown', function(e) {
+            if (imageList.length === 0) return;
+            
+            const filename = imageList[currentIndex];
+            const lines = linePositions[filename] || [];
+            
+            if (e.key === 'ArrowUp') {
+                // Next image (inverted)
+                if (currentIndex < imageList.length - 1) {
+                    currentIndex++;
+                    setImage(imageList[currentIndex]);
+                }
+                e.preventDefault();
+            } else if (e.key === 'ArrowDown') {
+                // Previous image (inverted)
+                if (currentIndex > 0) {
+                    currentIndex--;
+                    setImage(imageList[currentIndex]);
+                }
+                e.preventDefault();
+            } else if (e.key === 'ArrowLeft') {
+                // Move selected line left by 1 pixel
+                if (selectedLineIndex >= 0 && selectedLineIndex < lines.length) {
+                    lines[selectedLineIndex].x = Math.max(0, lines[selectedLineIndex].x - 1);
+                    updateLineControls();
+                    drawLines();
+                }
+                e.preventDefault();
+            } else if (e.key === 'ArrowRight') {
+                // Move selected line right by 1 pixel
+                if (selectedLineIndex >= 0 && selectedLineIndex < lines.length) {
+                    lines[selectedLineIndex].x = Math.min(canvas.width - 1, lines[selectedLineIndex].x + 1);
+                    updateLineControls();
+                    drawLines();
+                }
+                e.preventDefault();
+            } else if (e.key === 'Backspace') {
+                // Remove the selected line or last line if none selected
+                if (selectedLineIndex >= 0 && selectedLineIndex < lines.length) {
+                    lines.splice(selectedLineIndex, 1);
+                    selectedLineIndex = -1;
+                } else if (lines.length > 0) {
+                    lines.pop();
+                }
+                updateLineControls();
+                drawLines();
+                updateAnnotationStatus();
+                updateCurrentImageInfo();
+                e.preventDefault();
+            } else if (e.key === 'Escape') {
+                // Cancel current drawing operation (same as right-click)
+                if (isDrawing) {
+                    isDrawing = false;
+                    currentLine = null;
+                    drawLines();
+                }
+                e.preventDefault();
+            }
+        });
+
+        // Mouse wheel for scrolling images
+        container.addEventListener('wheel', function(e) {
+            if (imageList.length === 0) return;
+            if (e.deltaY < 0 && currentIndex > 0) {
+                currentIndex--;
+                setImage(imageList[currentIndex]);
+            } else if (e.deltaY > 0 && currentIndex < imageList.length - 1) {
+                currentIndex++;
+                setImage(imageList[currentIndex]);
+            }
+            e.preventDefault();
+        });
+
+        scrollbar.addEventListener('input', function(e) {
+            if (imageList.length === 0) return;
+            currentIndex = parseInt(scrollbar.value);
+            setImage(imageList[currentIndex]);
+        });
+
+        function drawLines() {
+            const ctx = canvas.getContext('2d');
+            ctx.clearRect(0, 0, canvas.width, canvas.height);
+            
+            if (imageList.length === 0) return;
+            
+            const filename = imageList[currentIndex];
+            const lines = linePositions[filename] || [];
+            
+            // Draw existing vertical lines and pixel counts
+            for (let i = 0; i < lines.length; i += 2) {
+                const line1 = lines[i];
+                const line2 = lines[i + 1];
+                
+                // Draw first vertical line
+                ctx.beginPath();
+                ctx.moveTo(line1.x, 0);
+                ctx.lineTo(line1.x, canvas.height);
+                ctx.strokeStyle = line1.color;
+                ctx.lineWidth = 2;
+                ctx.stroke();
+                
+                // Draw second vertical line if it exists
+                if (line2) {
+                    ctx.beginPath();
+                    ctx.moveTo(line2.x, 0);
+                    ctx.lineTo(line2.x, canvas.height);
+                    ctx.strokeStyle = line2.color;
+                    ctx.lineWidth = 2;
+                    ctx.stroke();
+                    
+                    // Calculate and display pixel count between the lines
+                    const pixelCount = Math.abs(line2.x - line1.x);
+                    const realWorldMeasurement = pixelCount * currentResolution;
+                    const centerX = (line1.x + line2.x) / 2;
+                    
+                    // Set text properties
+                    ctx.fillStyle = line1.color;
+                    ctx.font = 'bold 16px Arial';
+                    ctx.textAlign = 'center';
+                    ctx.textBaseline = 'top';
+                    
+                    // Add background rectangle for better visibility
+                    const text = `${realWorldMeasurement.toFixed(2)}μm`;
+                    const textMetrics = ctx.measureText(text);
+                    const textWidth = textMetrics.width;
+                    const textHeight = 20;
+                    const padding = 4;
+                    
+                    // Draw background rectangle
+                    ctx.fillStyle = 'rgba(255, 255, 255, 0.8)';
+                    ctx.fillRect(centerX - textWidth/2 - padding, 5, textWidth + 2*padding, textHeight);
+                    
+                    // Draw text
+                    ctx.fillStyle = line1.color;
+                    ctx.fillText(text, centerX, 5 + padding);
+                }
+            }
+            
+            // Draw temporary line while drawing
+            if (isDrawing && currentLine) {
+                // Use the actual positions without constraining
+                let leftX, rightX;
+                if (currentLine.startX < currentLine.endX) {
+                    // Dragging right: start is left, end is right
+                    leftX = currentLine.startX;
+                    rightX = currentLine.endX;
+                } else {
+                    // Dragging left: end is left, start is right
+                    leftX = currentLine.endX;
+                    rightX = currentLine.startX;
+                }
+                
+                // Draw the diagonal line you're drawing
+                ctx.beginPath();
+                ctx.moveTo(leftX, 0);
+                ctx.lineTo(rightX, canvas.height);
+                ctx.strokeStyle = currentLine.color;
+                ctx.lineWidth = 3;
+                ctx.setLineDash([5, 5]); // Dashed line for preview
+                ctx.stroke();
+                ctx.setLineDash([]); // Reset line dash
+                
+                // Draw the two vertical lines at left and right positions
+                ctx.beginPath();
+                // Left vertical line
+                ctx.moveTo(leftX, 0);
+                ctx.lineTo(leftX, canvas.height);
+                ctx.strokeStyle = currentLine.color;
+                ctx.lineWidth = 2;
+                ctx.stroke();
+                
+                // Right vertical line
+                ctx.beginPath();
+                ctx.moveTo(rightX, 0);
+                ctx.lineTo(rightX, canvas.height);
+                ctx.strokeStyle = currentLine.color;
+                ctx.lineWidth = 2;
+                ctx.stroke();
+                
+                // Calculate and display pixel count for temporary lines
+                const pixelCount = Math.abs(rightX - leftX);
+                const realWorldMeasurement = pixelCount * currentResolution;
+                const centerX = (leftX + rightX) / 2;
+                
+                // Set text properties
+                ctx.fillStyle = currentLine.color;
+                ctx.font = 'bold 16px Arial';
+                ctx.textAlign = 'center';
+                ctx.textBaseline = 'top';
+                
+                // Add background rectangle for better visibility
+                const text = `${realWorldMeasurement.toFixed(2)}μm`;
+                const textMetrics = ctx.measureText(text);
+                const textWidth = textMetrics.width;
+                const textHeight = 20;
+                const padding = 4;
+                
+                // Draw background rectangle
+                ctx.fillStyle = 'rgba(255, 255, 255, 0.8)';
+                ctx.fillRect(centerX - textWidth/2 - padding, 5, textWidth + 2*padding, textHeight);
+                
+                // Draw text
+                ctx.fillStyle = currentLine.color;
+                ctx.fillText(text, centerX, 5 + padding);
+            }
+        }
+
+        function updateLineControls() {
+            if (imageList.length === 0) return;
+            
+            const filename = imageList[currentIndex];
+            const lines = linePositions[filename] || [];
+            
+            lineList.innerHTML = '';
+            
+            // Group lines in pairs
+            for (let i = 0; i < lines.length; i += 2) {
+                const pairIndex = Math.floor(i / 2) + 1;
+                const line1 = lines[i];
+                const line2 = lines[i + 1];
+                
+                const pairDiv = document.createElement('div');
+                pairDiv.className = 'line-pair';
+                pairDiv.style.border = '1px solid #ddd';
+                pairDiv.style.margin = '5px 0';
+                pairDiv.style.padding = '10px';
+                pairDiv.style.borderRadius = '5px';
+                pairDiv.style.backgroundColor = '#f9f9f9';
+                
+                // Calculate pixel count between the lines
+                const pixelCount = line2 ? Math.abs(line2.x - line1.x) : 0;
+                const realWorldMeasurement = pixelCount * currentResolution;
+                
+                let pairHTML = `
+                    <div style="display: flex; align-items: center; gap: 10px; flex-wrap: wrap;">
+                        <span style="font-weight: bold; color: ${line1.color}; min-width: 120px;">Pair ${pairIndex} (${line1.color})</span>
+                        <span style="font-weight: bold; color: #666; background-color: #f0f0f0; padding: 2px 6px; border-radius: 3px; font-size: 12px;">${realWorldMeasurement.toFixed(2)}μm</span>
+                `;
+                
+                // First line of the pair
+                if (line1) {
+                    const isSelected1 = i === selectedLineIndex;
+                    pairHTML += `
+                        <span style="font-weight: ${isSelected1 ? 'bold' : 'normal'}; color: ${isSelected1 ? 'blue' : 'black'};">Start:</span>
+                        <input type="range" min="0" max="${canvas.width}" value="${line1.x}" 
+                               oninput="updateLineX(${i}, this.value)" style="width: 80px;">
+                        <button onclick="selectLine(${i})" style="padding: 2px 6px; font-size: 12px;">${isSelected1 ? '✓' : 'Select'}</button>
+                    `;
+                }
+                
+                // Second line of the pair
+                if (line2) {
+                    const isSelected2 = (i + 1) === selectedLineIndex;
+                    pairHTML += `
+                        <span style="font-weight: ${isSelected2 ? 'bold' : 'normal'}; color: ${isSelected2 ? 'blue' : 'black'};">End:</span>
+                        <input type="range" min="0" max="${canvas.width}" value="${line2.x}" 
+                               oninput="updateLineX(${i + 1}, this.value)" style="width: 80px;">
+                        <button onclick="selectLine(${i + 1})" style="padding: 2px 6px; font-size: 12px;">${isSelected2 ? '✓' : 'Select'}</button>
+                    `;
+                }
+                
+                // Remove button
+                pairHTML += `
+                        <button onclick="removePair(${i})" style="background-color: #ff6b6b; color: white; border: none; padding: 5px 8px; border-radius: 3px; cursor: pointer;" title="Remove Pair">🗑️</button>
+                    </div>
+                `;
+                
+                pairDiv.innerHTML = pairHTML;
+                lineList.appendChild(pairDiv);
+            }
+        }
+
+        function updateLineX(index, x) {
+            if (imageList.length === 0) return;
+            const filename = imageList[currentIndex];
+            const lines = linePositions[filename] || [];
+            if (lines[index]) {
+                lines[index].x = parseInt(x);
+                updateLineControls(); // Update controls to refresh pixel count
+                drawLines();
+            }
+        }
+
+        function updateLineColor(index, color) {
+            if (imageList.length === 0) return;
+            const filename = imageList[currentIndex];
+            const lines = linePositions[filename] || [];
+            if (lines[index]) {
+                lines[index].color = color;
+                drawLines();
+            }
+        }
+
+        function selectLine(index) {
+            if (imageList.length === 0) return;
+            const filename = imageList[currentIndex];
+            const lines = linePositions[filename] || [];
+            if (lines[index]) {
+                selectedLineIndex = index;
+                updateLineControls();
+            }
+        }
+
+        function removeLine(index) {
+            if (imageList.length === 0) return;
+            const filename = imageList[currentIndex];
+            const lines = linePositions[filename] || [];
+            if (lines[index]) {
+                lines.splice(index, 1);
+                if (selectedLineIndex === index) {
+                    selectedLineIndex = -1;
+                } else if (selectedLineIndex > index) {
+                    selectedLineIndex--;
+                }
+                updateLineControls();
+                drawLines();
+            }
+        }
+
+
+        function removePair(startIndex) {
+            if (imageList.length === 0) return;
+            const filename = imageList[currentIndex];
+            const lines = linePositions[filename] || [];
+            
+            // Remove both lines in the pair
+            if (lines[startIndex + 1]) {
+                lines.splice(startIndex, 2); // Remove 2 elements starting at startIndex
+            } else {
+                lines.splice(startIndex, 1); // Remove only 1 element if pair is incomplete
+            }
+            
+            // Adjust selected line index
+            if (selectedLineIndex >= startIndex) {
+                if (selectedLineIndex >= startIndex + 2) {
+                    selectedLineIndex -= 2;
+                } else {
+                    selectedLineIndex = -1;
+                }
+            }
+            
+            updateLineControls();
+            drawLines();
+            updateAnnotationStatus();
+            updateCurrentImageInfo();
+        }
+
+
+        clearLinesBtn.addEventListener('click', function() {
+            if (imageList.length === 0) return;
+            const filename = imageList[currentIndex];
+            linePositions[filename] = [];
+            selectedLineIndex = -1;
+            updateLineControls();
+            drawLines();
+            updateAnnotationStatus();
+            updateCurrentImageInfo();
+        });
+
+        saveBtn.addEventListener('click', function() {
+            if (imageList.length === 0) return;
+            
+            // Disable save button during save operation
+            saveBtn.disabled = true;
+            saveBtn.textContent = 'Saving...';
+            
+            const lines = [];
+            for (let i = 0; i < imageList.length; i++) {
+                const filename = imageList[i];
+                if (linePositions[filename] && linePositions[filename].length > 0) {
+                    lines.push({
+                        index: i,
+                        filepath: filename,
+                        lines: linePositions[filename],
+                        originalWidth: img.naturalWidth,
+                        originalHeight: img.naturalHeight,
+                        displayWidth: img.width,
+                        displayHeight: img.height
+                    });
+                }
+            }
+            
+            if (lines.length === 0) {
+                alert('No annotations to save. Please add some annotations first.');
+                saveBtn.disabled = false;
+                saveBtn.textContent = 'Save All Annotations';
+                return;
+            }
+            
+            fetch(BASE_PATH + '/save_lines', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ lines, volume })
+            })
+            .then(response => response.json())
+            .then(data => {
+                if (data.status === 'success') {
+                    alert(`Successfully saved annotations for ${lines.length} images!`);
+                } else {
+                    alert('Error saving lines: ' + data.message);
+                }
+            })
+            .catch(err => {
+                alert('Error saving lines: ' + err);
+            })
+            .finally(() => {
+                // Re-enable save button
+                saveBtn.disabled = false;
+                saveBtn.textContent = 'Save All Annotations';
+            });
+        });
+
+        previousVolumeBtn.addEventListener('click', function() {
+            if (imageList.length === 0) return;
+            
+            // Count annotations to show in confirmation
+            let annotationCount = 0;
+            imageList.forEach(filename => {
+                if (linePositions[filename] && linePositions[filename].length > 0) {
+                    annotationCount++;
+                }
+            });
+            
+            // Show confirmation dialog
+            const confirmMessage = annotationCount > 0 
+                ? `Save annotations for ${annotationCount} images and move to previous volume?`
+                : 'Move to previous volume? (No annotations to save)';
+                
+            if (!confirm(confirmMessage)) {
+                return;
+            }
+            
+            // Disable button during operation
+            previousVolumeBtn.disabled = true;
+            previousVolumeBtn.textContent = 'Saving & Moving...';
+            
+            // First save current annotations
+            const lines = [];
+            for (let i = 0; i < imageList.length; i++) {
+                const filename = imageList[i];
+                if (linePositions[filename] && linePositions[filename].length > 0) {
+                    lines.push({
+                        index: i,
+                        filepath: filename,
+                        lines: linePositions[filename],
+                        originalWidth: img.naturalWidth,
+                        originalHeight: img.naturalHeight,
+                        displayWidth: img.width,
+                        displayHeight: img.height
+                    });
+                }
+            }
+            
+            // Save annotations (even if empty)
+            fetch(BASE_PATH + '/save_lines', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ lines, volume })
+            })
+            .then(response => response.json())
+            .then(data => {
+                if (data.status === 'success') {
+                    // Get previous volume
+                    return fetch('/previous_volume?volume=' + encodeURIComponent(volume));
+                } else {
+                    throw new Error('Failed to save annotations: ' + data.message);
+                }
+            })
+            .then(response => response.json())
+            .then(data => {
+                if (data.error) {
+                    throw new Error(data.error);
+                }
+                
+                if (data.is_first) {
+                    alert('This is the first volume! Returning to volume list.');
+                    window.location.href = '/volumes';
+                } else if (data.previous_volume) {
+                    // Navigate to previous volume
+                    window.location.href = '/index?volume=' + encodeURIComponent(data.previous_volume);
+                } else {
+                    throw new Error('No previous volume found');
+                }
+            })
+            .catch(err => {
+                alert('Error: ' + err.message);
+                // Re-enable button on error
+                previousVolumeBtn.disabled = false;
+                previousVolumeBtn.textContent = 'Previous Volume';
+            });
+        });
+
+        nextVolumeBtn.addEventListener('click', function() {
+            if (imageList.length === 0) return;
+            
+            // Count annotations to show in confirmation
+            let annotationCount = 0;
+            imageList.forEach(filename => {
+                if (linePositions[filename] && linePositions[filename].length > 0) {
+                    annotationCount++;
+                }
+            });
+            
+            // Show confirmation dialog
+            const confirmMessage = annotationCount > 0 
+                ? `Save annotations for ${annotationCount} images and move to next volume?`
+                : 'Move to next volume? (No annotations to save)';
+                
+            if (!confirm(confirmMessage)) {
+                return;
+            }
+            
+            // Disable button during operation
+            nextVolumeBtn.disabled = true;
+            nextVolumeBtn.textContent = 'Saving & Moving...';
+            
+            // First save current annotations
+            const lines = [];
+            for (let i = 0; i < imageList.length; i++) {
+                const filename = imageList[i];
+                if (linePositions[filename] && linePositions[filename].length > 0) {
+                    lines.push({
+                        index: i,
+                        filepath: filename,
+                        lines: linePositions[filename],
+                        originalWidth: img.naturalWidth,
+                        originalHeight: img.naturalHeight,
+                        displayWidth: img.width,
+                        displayHeight: img.height
+                    });
+                }
+            }
+            
+            // Save annotations (even if empty)
+            fetch(BASE_PATH + '/save_lines', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ lines, volume })
+            })
+            .then(response => response.json())
+            .then(data => {
+                if (data.status === 'success') {
+                    // Get next volume
+                    return fetch('/next_volume?volume=' + encodeURIComponent(volume));
+                } else {
+                    throw new Error('Failed to save annotations: ' + data.message);
+                }
+            })
+            .then(response => response.json())
+            .then(data => {
+                if (data.error) {
+                    throw new Error(data.error);
+                }
+                
+                if (data.is_last) {
+                    alert('This is the last volume! Returning to volume list.');
+                    window.location.href = BASE_PATH + '/volumes';
+                } else if (data.next_volume) {
+                    // Navigate to next volume
+                    window.location.href = BASE_PATH + '/index?volume=' + encodeURIComponent(data.next_volume);
+                } else {
+                    throw new Error('No next volume found');
+                }
+            })
+            .catch(err => {
+                alert('Error: ' + err.message);
+                // Re-enable button on error
+                nextVolumeBtn.disabled = false;
+                nextVolumeBtn.textContent = 'Next Volume';
+            });
+        });
+
+        document.getElementById('back-btn').onclick = function() {
+            window.location.href = BASE_PATH + '/volumes';
+        };
+
+        btnUp.addEventListener('click', function() {
+            if (imageList.length === 0) return;
+            // Next image (inverted)
+            if (currentIndex < imageList.length - 1) {
+                currentIndex++;
+                setImage(imageList[currentIndex]);
+            }
+        });
+        btnDown.addEventListener('click', function() {
+            if (imageList.length === 0) return;
+            // Previous image (inverted)
+            if (currentIndex > 0) {
+                currentIndex--;
+                setImage(imageList[currentIndex]);
+            }
+        });
+    </script>
+</body>
+</html> 
