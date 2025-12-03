@@ -98,29 +98,29 @@ docker compose up -d
 2. Start the Flask application with the paths file:
    ```bash
    # Using default column names (id, file_path_coris)
-   python app.py --image-paths /path/to/image_paths.csv
-   
+   python app.py --host 0.0.0.0 --port 8082 --image-paths /path/to/image_paths.csv
+
    # Using custom column names
    python app.py --image-paths /path/to/image_paths.csv --volume-column "Volume Name" --path-column "Image Path"
    ```
 
 **Note**: The image paths file is now required. The app will only show volumes that are defined in the CSV file.
 
-3. Open your web browser and navigate to `http://localhost:5005`
+3. Open your web browser and navigate to `http://localhost:<PORT>`
 
 ### Command Line Arguments
 
 The application supports the following command line arguments:
 
 - `--host`: Host address to bind to (default: 0.0.0.0)
-- `--port`: Port to listen on (default: 5005)
+- `--port`: Port to listen on (default: 8082)
 - `--image-paths`: CSV file containing image paths mapping
 - `--volume-column`: Name of the volume column in the CSV file (default: id)
 - `--path-column`: Name of the path column in the CSV file (default: file_path_coris)
 
 **Example with custom columns:**
 ```bash
-python app.py --image-paths data.csv --volume-column "Study ID" --path-column "Directory Path" --port 8080
+python app.py --image-paths data.csv --volume-column "Study ID" --path-column "Directory Path" --port 8082
 ```
 
 ## Usage
