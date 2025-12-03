@@ -38,10 +38,9 @@ A web-based application for annotating medical images with vertical line markers
    │   └── ...
    └── ...
    ```
-3. Update the docker-compose.yml file to point to your images directory:
-   ```yaml
-   volumes:
-     - /path/to/your/images:/app/images:ro
+3. Update the .env after copying .env_sample to have the correct path to your images directory:
+   ```
+   PACS_DIR=...
    ```
 4. Build and run with Docker Compose:
    ```bash
